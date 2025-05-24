@@ -88,8 +88,8 @@
 
         // Generate a valid position
         do {
-          randomX = Math.random() * (gameAreaWidth - 300); // Assuming 100px as target size
-          randomY = Math.random() * (gameAreaHeight - 300);
+          randomX = Math.random() * (gameAreaWidth - 250); // Target size is 100px
+          randomY = Math.random() * (gameAreaHeight - 400);
         } while (!isPositionValid(randomX, randomY));
 
         // Save the position
