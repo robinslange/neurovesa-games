@@ -165,28 +165,34 @@
     let waitingForReaction = false;
     let pendingAdvance = false;
 
-    // Add Start button
-    let startBtn = document.getElementById("start-btn");
-    if (!startBtn) {
-      startBtn = document.createElement("button");
-      startBtn.id = "start-btn";
-      startBtn.textContent = "Start";
-      startBtn.style.position = "absolute";
-      startBtn.style.top = "50%";
-      startBtn.style.left = "50%";
-      startBtn.style.transform = "translate(-50%, -50%)";
-      startBtn.style.fontSize = "2em";
-      startBtn.style.padding = "18px";
-      startBtn.style.borderRadius = "12px";
-      startBtn.style.background = "#4caf50";
-      startBtn.style.color = "#fff";
-      startBtn.style.border = "none";
-      startBtn.style.boxShadow = "0 2px 8px rgba(0,0,0,0.12)";
-      startBtn.style.cursor = "pointer";
-      startBtn.style.zIndex = "1001";
-      startBtn.style.textAlign = "center";
-      gameArea.appendChild(startBtn);
+    // Function to create/get start button
+    function createStartButton() {
+      let startBtn = document.getElementById("start-btn");
+      if (!startBtn) {
+        startBtn = document.createElement("button");
+        startBtn.id = "start-btn";
+        startBtn.textContent = "Start";
+        startBtn.style.position = "absolute";
+        startBtn.style.top = "50%";
+        startBtn.style.left = "50%";
+        startBtn.style.transform = "translate(-50%, -50%)";
+        startBtn.style.fontSize = "2em";
+        startBtn.style.padding = "18px";
+        startBtn.style.borderRadius = "12px";
+        startBtn.style.background = "#4caf50";
+        startBtn.style.color = "#fff";
+        startBtn.style.border = "none";
+        startBtn.style.boxShadow = "0 2px 8px rgba(0,0,0,0.12)";
+        startBtn.style.cursor = "pointer";
+        startBtn.style.zIndex = "1001";
+        startBtn.style.textAlign = "center";
+        gameArea.appendChild(startBtn);
+      }
+      return startBtn;
     }
+
+    // Create initial start button
+    const startBtn = createStartButton();
 
     // Hide game controls until game starts
     pauseBtn.style.display = "none";
@@ -355,6 +361,7 @@
       generateTargets();
       addTargetListeners();
       advanceTarget();
+      createStartButton();
     });
 
     // Add click event listeners to targets
@@ -405,29 +412,6 @@
     }
 
     startBtn.onclick = startGame;
-
-    // On restart, show start button again and reset everything
-    restart.addEventListener("click", () => {
-      if (currentTimeout) {
-        clearTimeout(currentTimeout);
-        currentTimeout = null;
-      }
-      // Hide controls
-      pauseBtn.style.display = "none";
-      restart.style.display = "none";
-      // Show start button
-      startBtn.style.display = "block";
-      // Remove all targets
-      gameArea.innerHTML = "";
-      // Reset state
-      currentTargetIndex = 0;
-      totalTime = 0;
-      incorrectClicks = 0;
-      missedGreenTargets = 0;
-      if (results.targets) results.targets = {};
-      paused = false;
-      pauseBtn.textContent = "Pause";
-    });
 
     const scores = document.getElementById("scores");
 
