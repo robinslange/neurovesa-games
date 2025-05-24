@@ -1,0 +1,518 @@
+<html>
+  <body>
+    <div class="menu">
+      <button id="restart">Restart</button>
+      <button id="scores">Scores</button>
+      <button id="pause">Pause</button>
+    </div>
+
+    <section class="game-area"></section>
+  </body>
+</html>
+
+<style>
+  body {
+    background-color: #f5f5f5;
+    overflow: hidden;
+  }
+
+  .game-area {
+    width: 100vw;
+    height: 100vh;
+  }
+
+  .target {
+    width: 10rem;
+    height: 10rem;
+    border-radius: 100%;
+    background-color: green;
+    position: absolute;
+    opacity: 1;
+  }
+
+  .menu {
+    margin-top: 10px;
+    width: 100%;
+    display: flex;
+    flex-direction: row;
+    justify-content: center;
+    gap: 20px;
+  }
+
+  button {
+    width: 120px;
+    height: 60px;
+    border-radius: 15px;
+    font-size: 20px;
+  }
+</style>
+
+<script>
+  document.addEventListener("DOMContentLoaded", () => {
+    const gameArea = document.querySelector(".game-area");
+    const gameAreaWidth = gameArea.offsetWidth;
+    const gameAreaHeight = gameArea.offsetHeight;
+
+    // Clear existing targets
+    gameArea.innerHTML = "";
+
+    // Number of targets to show
+    const totalTargets = 15;
+
+    // Minimum distance between targets
+    const minDistance = 60; // Adjust as needed
+
+    // Store positions of targets
+    let positions = [];
+
+    // Function to check if a position is valid
+    function isPositionValid(x, y) {
+      return positions.every(([px, py]) => {
+        const distance = Math.sqrt((x - px) ** 2 + (y - py) ** 2);
+        return distance >= minDistance;
+      });
+    }
+
+    // Generate all targets
+    let targets = [];
+    function generateTargets() {
+      // Clear existing targets and positions
+      gameArea.innerHTML = "";
+      positions = [];
+      targets = [];
+      for (let i = 0; i < totalTargets; i++) {
+        const target = document.createElement("div");
+        target.classList.add("target");
+
+        let randomX, randomY;
+
+        // Generate a valid position
+        do {
+          randomX = Math.random() * (gameAreaWidth - 100); // Assuming 100px as target size
+          randomY = Math.random() * (gameAreaHeight - 100);
+        } while (!isPositionValid(randomX, randomY));
+
+        // Save the position
+        positions.push([randomX, randomY]);
+
+        // Randomize color with 70% green and 30% red
+        const isGreen = Math.random() < 0.7;
+        const randomColor = isGreen ? "green" : "red";
+
+        target.style.position = "absolute";
+        target.style.left = `${randomX}px`;
+        target.style.top = `${randomY}px`;
+        target.style.backgroundColor = randomColor;
+        target.style.borderRadius = "50%";
+        target.style.display = "none"; // Initially hidden
+
+        targets.push(target);
+        gameArea.appendChild(target);
+      }
+    }
+
+    // Initial target generation
+    generateTargets();
+
+    // Game state
+    let currentTargetIndex = 0;
+    let startTime = null;
+    let totalTime = 0;
+    let incorrectClicks = 0;
+    let missedGreenTargets = 0; // Track missed green targets
+
+    // Results object to store in localStorage
+    const results =
+      JSON.parse(localStorage.getItem("neurovesa_braingames")) || {};
+
+    startTime = performance.now();
+
+    // Add Pause button if not present
+    let pauseBtn = document.getElementById("pause");
+    if (!pauseBtn) {
+      pauseBtn = document.createElement("button");
+      pauseBtn.id = "pause";
+      pauseBtn.textContent = "Pause";
+      pauseBtn.style.marginLeft = "12px";
+      const controls = document.getElementById("controls") || document.body;
+      controls.appendChild(pauseBtn);
+    }
+
+    let paused = false;
+    let pauseTime = null;
+    let pauseTimeout = null;
+
+    // Store the current timeout for targets
+    let currentTimeout = null;
+
+    // Web Worker for timing (inline)
+    const timerWorkerCode = `
+    self.onmessage = function(e) {
+      if (e.data === 'start') {
+        self.startTime = performance.now();
+      } else if (e.data === 'stop') {
+        const elapsed = performance.now() - (self.startTime || 0);
+        self.postMessage(elapsed);
+      }
+    };
+  `;
+    const timerWorkerBlob = new Blob([timerWorkerCode], {
+      type: "application/javascript",
+    });
+    let timerWorker = new Worker(URL.createObjectURL(timerWorkerBlob));
+    let lastReactionTime = 0;
+    let waitingForReaction = false;
+    let pendingAdvance = false;
+
+    // Add Start button
+    let startBtn = document.getElementById("start-btn");
+    if (!startBtn) {
+      startBtn = document.createElement("button");
+      startBtn.id = "start-btn";
+      startBtn.textContent = "Start";
+      startBtn.style.position = "absolute";
+      startBtn.style.top = "50%";
+      startBtn.style.left = "50%";
+      startBtn.style.transform = "translate(-50%, -50%)";
+      startBtn.style.fontSize = "2em";
+      startBtn.style.padding = "18px";
+      startBtn.style.borderRadius = "12px";
+      startBtn.style.background = "#4caf50";
+      startBtn.style.color = "#fff";
+      startBtn.style.border = "none";
+      startBtn.style.boxShadow = "0 2px 8px rgba(0,0,0,0.12)";
+      startBtn.style.cursor = "pointer";
+      startBtn.style.zIndex = "1001";
+      startBtn.style.textAlign = "center";
+      gameArea.appendChild(startBtn);
+    }
+
+    // Hide game controls until game starts
+    pauseBtn.style.display = "none";
+    restart.style.display = "none";
+
+    // Helper to advance to the next target
+    function advanceTarget() {
+      if (currentTimeout) {
+        clearTimeout(currentTimeout);
+        currentTimeout = null;
+      }
+      if (currentTargetIndex > 0) {
+        // Check if previous target was green and not clicked
+        const prevTarget = targets[currentTargetIndex - 1];
+        if (
+          prevTarget.style.backgroundColor === "green" &&
+          !prevTarget.clicked
+        ) {
+          missedGreenTargets++;
+        }
+        prevTarget.style.display = "none";
+      }
+      if (currentTargetIndex < totalTargets) {
+        const currentTarget = targets[currentTargetIndex];
+        currentTarget.style.display = "block";
+        // Start timer for this target
+        waitingForReaction = true;
+        pendingAdvance = false;
+        timerWorker.postMessage("start");
+        currentTimeout = setTimeout(() => {
+          if (waitingForReaction) {
+            waitingForReaction = false;
+            pendingAdvance = true;
+            timerWorker.postMessage("stop");
+          }
+        }, 1500);
+      } else {
+        // Game over logic (existing code)
+        const averageTime = totalTime / (totalTargets - 1); // Exclude the first click
+        const score = Math.round(
+          2000 - averageTime - missedGreenTargets * 50 - incorrectClicks * 30
+        );
+        let gameOverPopover = document.getElementById("gameover-popover");
+        if (!gameOverPopover) {
+          gameOverPopover = document.createElement("div");
+          gameOverPopover.id = "gameover-popover";
+          gameOverPopover.style.position = "fixed";
+          gameOverPopover.style.top = "50%";
+          gameOverPopover.style.left = "50%";
+          gameOverPopover.style.transform = "translate(-50%, -50%)";
+          gameOverPopover.style.background = "#fff";
+          gameOverPopover.style.border = "1px solid #ccc";
+          gameOverPopover.style.borderRadius = "12px";
+          gameOverPopover.style.boxShadow = "0 2px 16px rgba(0,0,0,0.2)";
+          gameOverPopover.style.padding = "36px 32px 24px 32px";
+          gameOverPopover.style.zIndex = "2000";
+          gameOverPopover.style.minWidth = "340px";
+          gameOverPopover.style.display = "none";
+          gameOverPopover.innerHTML = `
+          <button id="close-gameover-popover" style="position:absolute;top:12px;right:16px;font-size:22px;background:none;border:none;cursor:pointer;">&times;</button>
+          <div id="gameover-content"></div>
+        `;
+          document.body.appendChild(gameOverPopover);
+          document.getElementById("close-gameover-popover").onclick = () => {
+            gameOverPopover.style.display = "none";
+          };
+        }
+        function getScoreColor(score) {
+          const percent = Math.max(0, Math.min(1, score / 1000));
+          const r = Math.round(255 * (1 - percent));
+          const g = Math.round(180 * percent + 60 * (1 - percent));
+          return `rgb(${r},${g},80)`;
+        }
+        const scoreColor = getScoreColor(score);
+        document.getElementById("gameover-content").innerHTML = `
+        <h1 style=\"margin-top:0;text-align:center;font-size:2.2em;letter-spacing:1px;\">Game Over</h1>
+        <div style=\"display:flex;justify-content:center;gap:32px;margin:18px 0 10px 0;font-size:1.1em;\">
+          <div><b>Avg Reaction:</b> ${averageTime.toFixed(2)}ms</div>
+          <div><b>Missed Greens:</b> ${missedGreenTargets}</div>
+          <div><b>Incorrect Clicks:</b> ${incorrectClicks}</div>
+        </div>
+        <div style=\"text-align:center;margin-top:18px;\">
+          <span style=\"font-size:2.3em;font-weight:bold;color:${scoreColor};\">${score}</span><br>
+          <span style=\"font-size:1.1em;color:#888;\">Final Score</span>
+        </div>
+      `;
+        gameOverPopover.style.display = "block";
+        // Add timestamped entry to results
+        const timestamp = new Date().toISOString();
+        results[timestamp] = {
+          averageTime: averageTime.toFixed(2),
+          incorrectClicks,
+          missedGreenTargets, // Save missed green targets
+          score,
+          targets: { ...results.targets },
+        };
+        // Save results to localStorage
+        localStorage.setItem("neurovesa_braingames", JSON.stringify(results));
+      }
+    }
+
+    // Listen for reaction time from worker
+    timerWorker.onmessage = function (e) {
+      if (!waitingForReaction && !pendingAdvance) return;
+      lastReactionTime = e.data;
+      totalTime += lastReactionTime;
+      if (!results.targets) results.targets = {};
+      results.targets[`target_${currentTargetIndex}`] = {
+        color: targets[currentTargetIndex]?.style.backgroundColor,
+        reactionTime: lastReactionTime.toFixed(2),
+      };
+      waitingForReaction = false;
+      if (pendingAdvance) {
+        pendingAdvance = false;
+        currentTargetIndex++;
+        advanceTarget();
+      }
+    };
+
+    // Modified pause/resume to work with new advanceTarget
+    pauseBtn.onclick = function () {
+      if (!paused) {
+        paused = true;
+        pauseBtn.textContent = "Resume";
+        pauseTime = performance.now();
+        // Hide current target
+        if (currentTargetIndex < totalTargets) {
+          targets[currentTargetIndex].style.display = "none";
+        }
+        // Stop any running timeout
+        if (currentTimeout) {
+          clearTimeout(currentTimeout);
+          currentTimeout = null;
+        }
+      } else {
+        paused = false;
+        pauseBtn.textContent = "Pause";
+        // Show current target again
+        if (currentTargetIndex < totalTargets) {
+          targets[currentTargetIndex].style.display = "block";
+          // Resume timer for the current target
+          currentTimeout = setTimeout(() => {
+            currentTargetIndex++;
+            advanceTarget();
+          }, 1500);
+        }
+      }
+    };
+
+    // Improved restart handler
+    restart.addEventListener("click", () => {
+      // Reset all game state
+      if (currentTimeout) {
+        clearTimeout(currentTimeout);
+        currentTimeout = null;
+      }
+      currentTargetIndex = 0;
+      startTime = performance.now();
+      totalTime = 0;
+      incorrectClicks = 0;
+      missedGreenTargets = 0;
+      if (results.targets) results.targets = {};
+      paused = false;
+      pauseBtn.textContent = "Pause";
+      // Generate new targets and listeners
+      generateTargets();
+      addTargetListeners();
+      advanceTarget();
+    });
+
+    // Add click event listeners to targets
+    function addTargetListeners() {
+      targets.forEach((target, index) => {
+        target.onclick = null; // Remove previous listeners if any
+        target.addEventListener("click", () => {
+          if (paused) return;
+          if (index === currentTargetIndex && waitingForReaction) {
+            // Mark as clicked
+            target.clicked = true;
+            // Stop timer and get reaction time
+            waitingForReaction = false;
+            pendingAdvance = true;
+            timerWorker.postMessage("stop");
+          }
+          if (target.style.backgroundColor === "red") {
+            // Incorrect red target clicked
+            incorrectClicks++;
+          }
+        });
+      });
+    }
+
+    // Function to start the game
+    function startGame() {
+      // Remove all targets and listeners
+      gameArea.innerHTML = "";
+      // Hide start button
+      startBtn.style.display = "none";
+      // Show controls
+      pauseBtn.style.display = "inline-block";
+      restart.style.display = "inline-block";
+      // Generate targets and listeners
+      generateTargets();
+      addTargetListeners();
+      // Reset state
+      currentTargetIndex = 0;
+      totalTime = 0;
+      incorrectClicks = 0;
+      missedGreenTargets = 0;
+      if (results.targets) results.targets = {};
+      paused = false;
+      pauseBtn.textContent = "Pause";
+      // Set start time for first reaction
+      startTime = performance.now();
+      advanceTarget();
+    }
+
+    startBtn.onclick = startGame;
+
+    // On restart, show start button again and reset everything
+    restart.addEventListener("click", () => {
+      if (currentTimeout) {
+        clearTimeout(currentTimeout);
+        currentTimeout = null;
+      }
+      // Hide controls
+      pauseBtn.style.display = "none";
+      restart.style.display = "none";
+      // Show start button
+      startBtn.style.display = "block";
+      // Remove all targets
+      gameArea.innerHTML = "";
+      // Reset state
+      currentTargetIndex = 0;
+      totalTime = 0;
+      incorrectClicks = 0;
+      missedGreenTargets = 0;
+      if (results.targets) results.targets = {};
+      paused = false;
+      pauseBtn.textContent = "Pause";
+    });
+
+    const scores = document.getElementById("scores");
+
+    scores.addEventListener("click", () => {
+      const gameData = JSON.parse(localStorage.getItem("neurovesa_braingames"));
+      const gameResults = Object.entries(gameData)
+        .filter(([key]) => key !== "targets" && !isNaN(Date.parse(key)))
+        // Sort by timestamp (newest first)
+        .sort(
+          ([timestampA], [timestampB]) =>
+            new Date(timestampB).getTime() - new Date(timestampA).getTime()
+        )
+        // Take only the 5 most recent results
+        .slice(0, 5)
+        // Map to a cleaner format
+        .map(([timestamp, data]) => ({
+          timestamp,
+          averageTime: data.averageTime,
+          incorrectClicks: data.incorrectClicks,
+          missedGreenTargets: data.missedGreenTargets,
+          targets: data.targets,
+          score: data.score,
+        }));
+
+      // Create popover if it doesn't exist
+      let popover = document.getElementById("scores-popover");
+      if (!popover) {
+        popover = document.createElement("div");
+        popover.id = "scores-popover";
+        popover.style.position = "fixed";
+        popover.style.top = "50%";
+        popover.style.left = "50%";
+        popover.style.transform = "translate(-50%, -50%)";
+        popover.style.background = "#fff";
+        popover.style.border = "1px solid #ccc";
+        popover.style.borderRadius = "8px";
+        popover.style.boxShadow = "0 2px 16px rgba(0,0,0,0.2)";
+        popover.style.padding = "24px 24px 16px 24px";
+        popover.style.zIndex = "1000";
+        popover.style.minWidth = "420px";
+        popover.style.display = "none";
+        popover.innerHTML = `
+        <button id="close-scores-popover" style="position:absolute;top:8px;right:12px;font-size:18px;background:none;border:none;cursor:pointer;">&times;</button>
+        <h2 style="margin-top:0;text-align:center;">Recent Scores</h2>
+        <div id="scores-table-container"></div>
+      `;
+        document.body.appendChild(popover);
+        document.getElementById("close-scores-popover").onclick = () => {
+          popover.style.display = "none";
+        };
+      }
+
+      // Build HTML table
+      let tableHtml = `<table style="width:100%;border-collapse:collapse;text-align:center;">
+      <thead>
+        <tr style="background:#f5f5f5;">
+          <th style="padding:6px 8px;border-bottom:1px solid #ccc;">Timestamp</th>
+          <th style="padding:6px 8px;border-bottom:1px solid #ccc;">Avg Reaction (ms)</th>
+          <th style="padding:6px 8px;border-bottom:1px solid #ccc;">Missed Greens</th>
+          <th style="padding:6px 8px;border-bottom:1px solid #ccc;">Incorrect Clicks</th>
+          <th style="padding:6px 8px;border-bottom:1px solid #ccc;">Score</th>
+        </tr>
+      </thead>
+      <tbody>`;
+      gameResults.forEach((result) => {
+        tableHtml += `<tr>
+        <td style="padding:6px 8px;border-bottom:1px solid #eee;">${result.timestamp
+          .slice(0, 19)
+          .replace("T", " ")}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #eee;">${
+          result.averageTime
+        }</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #eee;">${
+          result.missedGreenTargets ?? 0
+        }</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #eee;">${
+          result.incorrectClicks ?? 0
+        }</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #eee;">${
+          result.score ?? ""
+        }</td>
+      </tr>`;
+      });
+      tableHtml += "</tbody></table>";
+      popover.querySelector("#scores-table-container").innerHTML = tableHtml;
+      popover.style.display = "block";
+    });
+  });
+</script>
